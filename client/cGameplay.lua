@@ -1,0 +1,833 @@
+
+--[[----Class-Gameplay----||--
+
+	Description:
+		Controls Gameplay Behaviour
+
+--||----------------------]]--
+
+
+--[[----Legend----||--
+
+	[*] = Gets saved to disk in intervals and on resourceStop
+	[{}] = contents table information
+	
+--||--------------]]--
+
+addEvent("onClientStatUpdate", true);
+addEvent("onClientMatchRespawn", true);
+
+--[[----Player-Data----||--
+	
+	
+--||-------------------]]--
+
+local pFieldMinX, pFieldMinY, pFieldMinZ = false, false, false;
+local pFieldMaxX, pFieldMaxY, pFieldMaxZ = false, false, false;
+local pCenterX, pCenterY, pCenterZ = false, false, false;
+local pHeight = false;
+
+--- Score Display ---
+
+gScoreDisplayFontSize = 0.17 + 0.35 / 1080 * gScreenSizeY;
+gScoreDisplayLoadingFontSize = gScoreDisplayFontSize * 100;
+gScoreDisplayFont = "Arial";
+
+--- Stat Display ---
+
+STAT_FONT = "arial";
+STAT_FONT_SIZE = 1.8 / 1080 * gScreenSizeY;
+STAT_FONT_HEIGHT = dxGetFontHeight(STAT_FONT_SIZE, STAT_FONT);
+
+STAT_FADE_OUT_AFTER = 3000;
+STAT_WINDOW_HEIGHT = STAT_FONT_HEIGHT * 2.1;
+STAT_SPACE = STAT_WINDOW_HEIGHT / 2;
+STAT_START_POS_Y = gScreenSizeY * 0.2;
+STAT_FADE_OUT_SPEED = 100.0;
+
+local pCurrentVisualStats = { }
+local pStatSoundBlocked = false;
+
+--- Draw Ball Arrow ---
+
+BALL_ARROW_SIZE = gScreenSizeY * 0.1 / 1080 * gScreenSizeY;
+BALL_ARROW_SIZE_HALF = BALL_ARROW_SIZE / 2;
+
+--- Visual Field Limits ---
+
+IMPACT_SIZE = 4;
+IMPACT_FADE_OUT_SPEED = 20.0;
+
+local pImpacts = { };
+local pImpactMaterial = dxCreateTexture("data/images/impact.png");
+
+--- Draw Golden Goal ---
+
+GOLDEN_GOAL_FONT_SIZE = 3 / 1920 * gScreenSizeY;
+GOLDEN_GOAL_PULSE_SIZE = GOLDEN_GOAL_FONT_SIZE/5;
+
+--- Jump Script ---
+
+local pJumpCount = 2;
+
+
+
+
+addEventHandler("onClientStatUpdate", root,
+	function (stat, value, color, unit)
+		-- only use first digit after comma
+		value = math.round(value, 1);
+		
+		-- calculate id and insert it into the draw table
+		local id = #pCurrentVisualStats + 1;
+		pCurrentVisualStats[id] = { fadeOut = false, text = tostring(stat).."\n"..tostring(value)..(unit and (" "..tostring(unit)) or ""), alpha = 200, color = color };
+		
+		-- play sound
+		if (not pStatSoundBlocked) then
+			playSound("data/audio/statUpdate.mp3");
+			pStatSoundBlocked = true;
+			setTimer(function () pStatSoundBlocked = false; end, 1000, 1);
+		end
+		
+		-- process fadeout
+		setTimer(function (id) pCurrentVisualStats[id].fadeOut = true; end, STAT_FADE_OUT_AFTER, 1, id);
+	end
+);
+
+addEventHandler("onClientDeltaRender", root,
+	function (delta)
+		local remove = { };
+		for id, info in pairs(pCurrentVisualStats) do
+			-- process fade out
+			if (info.fadeOut) then
+				info.alpha = math.max(0, info.alpha - delta * STAT_FADE_OUT_SPEED);
+			end
+			if (info.alpha > 0) then
+				-- calculate size and position
+				local width = math.max(gScreenSizeX * 0.1, dxGetTextWidth(info.text, STAT_FONT_SIZE, STAT_FONT) * 1.1);
+				local posX = (gScreenSizeX - width) / 2;
+				local posY = STAT_START_POS_Y + (id-1) * (STAT_SPACE + STAT_WINDOW_HEIGHT); 
+				local color = info.color;
+			
+				-- draw background
+				dxDrawImage(posX, posY, width, STAT_WINDOW_HEIGHT, "data/images/roundBackground.png", 0, 0, 0, tocolor(color.r, color.g, color.b, info.alpha));
+				
+				-- draw text border
+				local offset = STAT_FONT_HEIGHT * 0.06;
+				dxDrawText(info.text, posX - offset, posY - offset, posX + width - offset, posY + STAT_WINDOW_HEIGHT - offset, tocolor(0, 0, 0, info.alpha), STAT_FONT_SIZE, STAT_FONT, "center", "center");
+				dxDrawText(info.text, posX + offset, posY - offset, posX + width + offset, posY + STAT_WINDOW_HEIGHT - offset, tocolor(0, 0, 0, info.alpha), STAT_FONT_SIZE, STAT_FONT, "center", "center");
+				dxDrawText(info.text, posX + offset, posY + offset, posX + width + offset, posY + STAT_WINDOW_HEIGHT + offset, tocolor(0, 0, 0, info.alpha), STAT_FONT_SIZE, STAT_FONT, "center", "center");
+				dxDrawText(info.text, posX - offset, posY + offset, posX + width - offset, posY + STAT_WINDOW_HEIGHT + offset, tocolor(0, 0, 0, info.alpha), STAT_FONT_SIZE, STAT_FONT, "center", "center");
+				
+				-- draw text
+				dxDrawText(info.text, posX, posY, posX + width, posY + STAT_WINDOW_HEIGHT, tocolor(255, 255, 255, info.alpha), STAT_FONT_SIZE * 1, STAT_FONT, "center", "center");
+			else
+				table.insert(remove, id);
+			end
+		end
+		-- remove faded out texts
+		for _, id in ipairs(remove) do
+			pCurrentVisualStats[id] = nil;
+		end
+	end
+);
+
+--- Push Vehicle back into the Field ---
+
+local pPushbackForceX = false;
+local pPushbackForceY = false;
+
+addEventHandler("onClientDeltaPreRender", root,
+	function (delta)
+		if (gFieldMinX and getCurrentArena()) then
+			local vehicle = Player.getVehicle(localPlayer);
+			if (isValid(vehicle)) then
+				local x, y, z = getElementPosition(vehicle);
+				local vx, vy, vz = getElementVelocity(vehicle);
+				
+				if (x < pFieldMinX) then
+					pPushbackForceX = (pPushbackForceX or 0.0) + delta * 0.1;
+				elseif (x > pFieldMaxX) then
+					pPushbackForceX = (pPushbackForceX or 0.0) - delta * 0.1;
+				else
+					pPushbackForceX = false;
+				end
+				
+				if (y < pFieldMinY) then
+					pPushbackForceY = (pPushbackForceY or 0.0) + delta * 0.1;
+				elseif (y > pFieldMaxY) then
+					pPushbackForceY = (pPushbackForceY or 0.0) - delta * 0.1;
+				else
+					pPushbackForceY = false;
+				end
+				addToDebug("pPushbackForceX: "..tostring(pPushbackForceX).." pPushbackForceY: "..tostring(pPushbackForceY));
+				
+				if (pPushbackForceX) then
+					vx = vx + math.clamp(pPushbackForceX, -0.05, 0.05);
+					vz = math.min(0.1, vz + 0.01);
+				end
+				if (pPushbackForceY) then
+					vy = vy + math.clamp(pPushbackForceY, -0.05, 0.05);
+					vz = math.min(0.1, vz + 0.01);
+				end
+				
+				if (pPushbackForceX or pPushbackForceY) then
+					setElementVelocity(vehicle, vx, vy, vz);
+				end
+			end
+		end
+	end
+);
+
+--- Draw 3D Score ---
+
+REAL_MATCH_SCORE_SIZE_X = 500;
+REAL_MATCH_SCORE_SIZE_Y = 200;
+REAL_MATCH_SCORE_DRAW_SIZE_X = 30;
+REAL_MATCH_SCORE_DRAW_SIZE_Y = REAL_MATCH_SCORE_DRAW_SIZE_X * REAL_MATCH_SCORE_SIZE_Y / REAL_MATCH_SCORE_SIZE_X;
+gMatchScoreTexture = dxCreateRenderTarget(REAL_MATCH_SCORE_SIZE_X, REAL_MATCH_SCORE_SIZE_Y, true);
+gMatchScoreTexture_reverse = dxCreateRenderTarget(REAL_MATCH_SCORE_SIZE_X, REAL_MATCH_SCORE_SIZE_Y, true);
+
+local pScorePosX, pScorePosY, pScorePosZ = false, false, false;
+
+addEventHandler("onClientPreRender", root,
+	function ()
+		local arena = getCurrentArena();
+		if (isValid(arena)) then
+			local mode = Arena.getMode(arena);
+			if (gCurrentStadiumOrientationX) then
+				dxDrawMaterialLine3D(	pScorePosX, pScorePosY, pScorePosZ + REAL_MATCH_SCORE_DRAW_SIZE_Y / 2, 
+										pScorePosX, pScorePosY, pScorePosZ - REAL_MATCH_SCORE_DRAW_SIZE_Y / 2, 
+										(mode == "Match" and gMatchScoreTexture_reverse or gMatchScoreTexture), REAL_MATCH_SCORE_DRAW_SIZE_X*0.8, tocolor(255, 255, 255, 255), pCenterX, pCenterY, pScorePosZ);
+				dxDrawMaterialLine3D(	gCameraPosX, gCameraPosY, pScorePosZ + REAL_MATCH_SCORE_DRAW_SIZE_Y / 2, 
+										gCameraPosX, gCameraPosY, pScorePosZ - REAL_MATCH_SCORE_DRAW_SIZE_Y / 2, 
+										gMatchScoreTexture, REAL_MATCH_SCORE_DRAW_SIZE_X, tocolor(255, 255, 255, 255), pCenterX, pCenterY, pScorePosZ);
+			else
+				dxDrawMaterialLine3D(	pScorePosX, pScorePosY, pScorePosZ + REAL_MATCH_SCORE_DRAW_SIZE_Y / 2, 
+										pScorePosX, pScorePosY, pScorePosZ - REAL_MATCH_SCORE_DRAW_SIZE_Y / 2, 
+										(mode == "Match" and gMatchScoreTexture_reverse or gMatchScoreTexture), REAL_MATCH_SCORE_DRAW_SIZE_X, tocolor(255, 255, 255, 255), pCenterX, pCenterY, pScorePosZ);
+				dxDrawMaterialLine3D(	gCameraPosX, gCameraPosY, pScorePosZ + REAL_MATCH_SCORE_DRAW_SIZE_Y / 2, 
+										gCameraPosX, gCameraPosY, pScorePosZ - REAL_MATCH_SCORE_DRAW_SIZE_Y / 2, 
+										gMatchScoreTexture, REAL_MATCH_SCORE_DRAW_SIZE_X, tocolor(255, 255, 255, 255), pCenterX, pCenterY, pScorePosZ);
+			end
+		end
+	end
+);
+
+addEventHandler("onClientRestore", root,
+	function (didClearRenderTargets)
+		if didClearRenderTargets then
+			redrawMatchScore();
+		end
+	end
+)
+
+function redrawMatchScore()
+	local arena = getCurrentArena();
+	if (isValid(arena)) then
+		if (not isMainMenuActive()) then
+			local drawString = ""
+			local drawString_reverse = ""
+			if (Arena.getMode(arena) == "Match") then
+				-- first draw all the teams (to keep compatibility to maybe later 4-team matches)
+				local teams = getElementsByType("matchteam", arena)
+				local teams_reverse = table.reverse(teams)
+
+				for _, team in ipairs(teams) do
+					local col = getData(team, "Color");
+					drawString = drawString .. "#FFFFFF : " ..tostring(getColorTagString(col.r, col.g, col.b)) .. tostring(getData(team, "Name"));
+				end
+				drawString = drawString:sub(7 + 4, #drawString) .. "\n#FFFFFF"
+
+				for _, team in ipairs(teams_reverse) do
+					local col = getData(team, "Color")
+					drawString_reverse = drawString_reverse .. "#FFFFFF : " ..tostring(getColorTagString(col.r, col.g, col.b)) .. tostring(getData(team, "Name"));
+				end
+				drawString_reverse = drawString_reverse:sub(7 + 4, #drawString_reverse) .. "\n#FFFFFF"
+	
+				-- now draw the score of them into a new line
+				for _, team in ipairs(teams) do
+					drawString = drawString .. "#FFFFFF" .. tostring(getData(team, "Score")) .. "       "
+				end
+				drawString = drawString:sub(1, #drawString - 7)
+
+				for _, team in ipairs(teams_reverse) do
+					drawString_reverse = drawString_reverse .. "#FFFFFF " .. tostring(getData(team, "Score")) .. "        ";
+				end
+				drawString_reverse = drawString_reverse:sub(1, #drawString_reverse - 8);
+			elseif (Arena.getMode(arena) == "Training") then
+				drawString = "#ff8900TRAINING";
+			end
+			if (dxSetRenderTarget(gMatchScoreTexture, true)) then
+				dxDrawRoundedRectangle( 0, 0, REAL_MATCH_SCORE_SIZE_X, REAL_MATCH_SCORE_SIZE_Y, 12, tocolor(0, 0, 0, 200));
+	
+				local width, height = getTextDimension(drawString, LOBBY_ARENA_BLACK_FONT, 1)
+				local scale = math.min(REAL_MATCH_SCORE_SIZE_X/width, REAL_MATCH_SCORE_SIZE_Y/height)
+				dxDrawText(drawString, 0, 0, REAL_MATCH_SCORE_SIZE_X, REAL_MATCH_SCORE_SIZE_Y, 
+											tocolor(255, 255, 255, 255), 1 * scale * 0.9, LOBBY_ARENA_BLACK_FONT, 
+											"center", "center", false, false, false, true);
+				dxSetRenderTarget();
+
+				if (Arena.getMode(arena) == "Match" and dxSetRenderTarget(gMatchScoreTexture_reverse, true)) then
+					dxDrawRoundedRectangle( 0, 0, REAL_MATCH_SCORE_SIZE_X, REAL_MATCH_SCORE_SIZE_Y, 12, tocolor(0, 0, 0, 200));
+
+					local width, height = getTextDimension(drawString_reverse, LOBBY_ARENA_BLACK_FONT, 1)
+					local scale = math.min(REAL_MATCH_SCORE_SIZE_X/width, REAL_MATCH_SCORE_SIZE_Y/height)
+					dxDrawText(drawString_reverse, 0, 0, REAL_MATCH_SCORE_SIZE_X, REAL_MATCH_SCORE_SIZE_Y, 
+											tocolor(255, 255, 255, 255), 1 * scale * 0.9, LOBBY_ARENA_BLACK_FONT, 
+											"center", "center", false, false, false, true);
+					dxSetRenderTarget();
+				end
+			else
+				setTimer(redrawMatchScore, 500, 1);
+			end
+		else
+			setTimer(redrawMatchScore, 500, 1);
+		end
+	end
+end
+addEventHandler("onClientGoalScore", root, redrawMatchScore);
+addEventHandler("onClientArenaPlayerInit", resourceRoot, redrawMatchScore);
+addEventHandler("onClientRestore", localPlayer, redrawMatchScore);
+
+addEventHandler("onClientArenaPlayerInit", resourceRoot,
+	function ()
+		pFieldMinX, pFieldMinY, pFieldMinZ, pFieldMaxX, pFieldMaxY, pFieldMaxZ = Stadium.getCurrentLimits();
+		if ((pFieldMaxX - pFieldMinX) > (pFieldMaxY - pFieldMinY)) then
+			gCameraPosX, gCameraPosY, gCameraPosZ = ((pFieldMaxX + pFieldMinX)/2), pFieldMinY, pFieldMinZ + 50.0;
+			pScorePosX, pScorePosY, pScorePosZ = ((pFieldMaxX + pFieldMinX)/2), pFieldMaxY, pFieldMinZ + 25.0;
+			gCurrentStadiumOrientationX = true;
+		else
+			gCameraPosX, gCameraPosY, gCameraPosZ = pFieldMinX, ((pFieldMaxY + pFieldMinY)/2), pFieldMinZ + 50.0;
+			pScorePosX, pScorePosY, pScorePosZ = pFieldMaxX, ((pFieldMaxY + pFieldMinY)/2), pFieldMinZ + 25.0;
+			gCurrentStadiumOrientationX = false;
+		end
+		if (Arena.getMode(source) == "Match") then
+			setSpectateCameraEnabled(true);
+		end
+	end, true, "high+10"
+);
+
+--- Draw Ball Arrow ---
+
+addModeHandler("onClientGameRender", "Match",
+	function ()
+		local arena = source;
+		local px, py, pz, lx, ly, lz = getCameraMatrix();
+		local camrz = math.rad(-getAngleBetweenPoints(lx, ly, px, py));
+		for _, ball in ipairs(getElementsByType("ball", arena)) do
+			local bx, by, bz = getElementPosition(ball);
+			local onScreen = getScreenFromWorldPosition(bx, by, bz);
+			if (not onScreen) then
+				local ballrz = math.rad(-getAngleBetweenPoints(bx, by, px, py));
+				local rz = (camrz - ballrz) + math.pi;
+			
+				local sx = math.sin(rz)
+				local sy = math.cos(rz)
+			
+				local x, y = (sx + 1) * gScreenCenterX, (sy + 1) * gScreenCenterY;
+			
+				x, y = math.clamp(x, BALL_ARROW_SIZE_HALF, gScreenSizeX - BALL_ARROW_SIZE_HALF), math.clamp(y, BALL_ARROW_SIZE_HALF, gScreenSizeY - BALL_ARROW_SIZE_HALF);
+				dxDrawImage(x - BALL_ARROW_SIZE_HALF, y - BALL_ARROW_SIZE_HALF, BALL_ARROW_SIZE, BALL_ARROW_SIZE, 
+							"data/images/ballarrow.png", -math.deg(rz), 0, 0, tocolor(255, 255, 255, 255), false);
+			end
+		end
+	end
+);
+
+--- Creator Notification ---
+
+addEventHandler("onClientGameRender", root,
+	function (delta)
+		local arena = source;
+		
+		if (Arena.getMode(arena) == "Match") then
+		
+			if ( getData(localPlayer, "Client.TeamSelectionActive") ) then
+				-- draw text to let the creator notify how to start the game
+				dxDrawRoundedRectangle( gScreenSizeX / 2 - HUD_LABEL_WIDTH * 2, HUD_POS_Y + HUD_CIRCLE_WIDTH / 6, HUD_LABEL_WIDTH * 4, 2 * HUD_CIRCLE_WIDTH / 3, 100, tocolor( 33, 33, 33, 200 ) );
+				dxDrawText( "Select your team", gScreenSizeX / 2, HUD_POS_Y + HUD_CIRCLE_WIDTH / 2, gScreenSizeX / 2, HUD_POS_Y + HUD_CIRCLE_WIDTH / 2, tocolor(255, 255, 255, 255), 
+							HUD_FONT_SIZE, "default-bold", "center", "center" );
+			elseif ( Arena.getCreator(arena) == localPlayer and  Arena.getState(arena) == "Initializing") then
+				-- draw text to let the creator notify how to start the game
+				dxDrawRoundedRectangle( gScreenSizeX / 2 - HUD_LABEL_WIDTH * 2, HUD_POS_Y + HUD_CIRCLE_WIDTH / 6, HUD_LABEL_WIDTH * 4, 2 * HUD_CIRCLE_WIDTH / 3, 100, tocolor( 46, 204, 64, 200 ) );
+				dxDrawText( "Press ENTER to start the match!", gScreenSizeX / 2, HUD_POS_Y + HUD_CIRCLE_WIDTH / 2, gScreenSizeX / 2, HUD_POS_Y + HUD_CIRCLE_WIDTH / 2, tocolor(255, 255, 255, 255), 
+							HUD_FONT_SIZE, "default-bold", "center", "center" );
+			end
+		end
+	end
+);
+
+--- Disable Collisions ---
+
+setTimer(
+	function ()
+		local arena = getCurrentArena();
+		if (arena ~= LOBBY_ARENA) then
+			local teams = getElementsByType("matchteam", arena);
+			-- loop through all players in the arena
+			for _, player1 in ipairs(getElementsByType("player", arena)) do
+				local localTeam = getData(player1, "MatchTeam");
+				local vehicle = getData(player1, "Vehicle");
+				if (isValid(vehicle)) then
+					for _, player in ipairs(getElementsByType("player", arena)) do
+						local veh = getData(player, "Vehicle");
+						if (isValid(veh)) then
+							-- disable collisions in training mode and for teammates
+							if ((Arena.getMode(arena) == "Training") or (isValid(localTeam) and localTeam == getData(player, "MatchTeam"))) then
+								setElementCollidableWith(vehicle, veh, false);
+								setElementCollidableWith(veh, vehicle, false);
+							else
+								setElementCollidableWith(vehicle, veh, true);
+								setElementCollidableWith(veh, vehicle, true);
+							end
+						end
+					end
+				end
+
+				if (isValid(vehicle) and Arena.getMode(arena) == "Match" and localTeam ~= teams[1] and not getData(vehicle, "skinReplaced")) then
+					engineApplyShaderToWorldTexture( SKIN_SANDKING_BLUE, "numberteam", vehicle );
+					setData(vehicle, "skinReplaced", true);
+				end
+			end
+		end
+	end, 2000, 0
+);
+
+--- Missiontimer ---
+MATCHTIME = {};
+addModeHandler("onClientArenaPlayerPreInit", "Match",
+	function ()
+
+		MATCHTIME.remainingTime = math.max(getData(source, "RemainingTime") or 0, 0);
+		MATCHTIME.lastTimestamp = getRealTime()['timestamp'];
+		MATCHTIME.frozen = (Arena.getState(source) ~= "Running" and Arena.getState(source) ~= "GoldenGoal");
+
+		if not frozen then
+			MATCHTIME.remainingTime = MATCHTIME.remainingTime - getPlayerPing(localPlayer);
+		end
+		-- create missiontimer and set to current time
+		--[[gMissionTimer = exports.missiontimer:createMissionTimer(math.max(getData(source, "RemainingTime") or 0, 0),true,true,0.5,0.0065,true,"default-bold",1, 0, 255, 0)
+		exports.missiontimer:setMissionTimerHurryTime(gMissionTimer, 30000);
+		exports.missiontimer:setMissionTimerFrozen(gMissionTimer, (Arena.getState(source) ~= "Running"));]]
+	end
+);
+
+setTimer(
+	function()
+		if MATCHTIME.remainingTime and not MATCHTIME.frozen then
+			local timestamp = getRealTime()['timestamp'];
+			MATCHTIME.remainingTime = MATCHTIME.remainingTime - (timestamp - MATCHTIME.lastTimestamp) * 1000;
+			MATCHTIME.lastTimestamp = timestamp;
+		end
+	end
+, 1000, 0);
+
+addEventHandler("onClientArenaStateChange", resourceRoot,
+	function (oldState, newState)
+		local arena = getCurrentArena();
+		if source == arena then
+
+			if newState == "Initializing" then
+				MATCHTIME.remainingTime = math.max(getData(source, "RemainingTime") or 0, 0);
+				MATCHTIME.lastTimestamp = getRealTime()['timestamp'];
+				setTimer(redrawMatchScore, 2 * SECONDS, 1);
+			elseif newState == "Running" then
+				KICK_SPRING = 0;
+				KICK_SPRING_START = false;
+				if oldState == "Initializing" then
+					redrawMatchScore();
+				end
+			elseif newState == "Finished" then
+				MATCHTIME.remainingTime = 0;
+			end
+
+			if MATCHTIME.remainingTime then
+				local wasFrozen = MATCHTIME.frozen;
+				MATCHTIME.frozen = (newState ~= "Running" and newState ~= "GoldenGoal");
+				if (wasFrozen and not MATCHTIME.frozen) then
+					MATCHTIME.lastTimestamp = getRealTime()['timestamp'];
+				end
+			end
+			--if (isValid(gMissionTimer)) then
+				--exports.missiontimer:setMissionTimerFrozen(gMissionTimer, (newState == "Paused"));
+			--end
+
+		end
+	end
+);
+
+addEventHandler("onClientArenaPlayerExit", resourceRoot,
+	function ()
+		MATCHTIME = {};
+	end
+);
+
+--- Infinite NOS ---
+
+setTimer(
+	function ()
+		local vehicle = getData(localPlayer, "Vehicle")
+		if (isValid(vehicle)) then
+			setVehicleNitroActivated(vehicle, true)
+			setVehicleNitroLevel(vehicle, 1.0)
+			--setControlState("vehicle_fire", true);--not getControlState("vehicle_fire"));
+		end
+	end, 1000, 0
+)
+
+addEventHandler("onClientElementDestroy", root,
+	function ()
+	
+	end
+);
+
+--- Score Display ---
+
+HUDScore = {
+	FadeProgress = 0,
+	FadeIn = false,
+	FadeOut = false,
+}
+
+function HUDScore.toggle()
+	HUDScore[HUDScore.isVisible() and "hide" or "show"]();
+end
+bindKey("F5", "down", HUDScore.toggle);
+
+function HUDScore.show()
+	HUDScore.FadeIn = true;
+	HUDScore.FadeOut = false;
+end
+addEventHandler("onClientArenaPlayerInit", resourceRoot, HUDScore.show);
+addEventHandler("onClientGoalScore", root, HUDScore.show);
+
+function HUDScore.hide()
+	cleanUpTimer(HUDScore.FadeTimer);
+	HUDScore.FadeTimer = false;
+	HUDScore.FadeIn = false;
+	HUDScore.FadeOut = true;
+end
+
+function HUDScore.isVisible()
+	return HUDScore.Visible
+end
+
+GOLDEN_GOAL_LINE_HEIGHT = dxGetFontHeight(GOLDEN_GOAL_FONT_SIZE, "arial")
+
+addModeHandler("onClientGameRender", "Match",
+	function (delta)
+		local arena = source
+		
+		-- first draw all the teams (to keep compatibility to maybe later 4-team matches)
+		
+		if (HUDScore.FadeIn) then
+			if ( getData(localPlayer, "Client.TeamSelectionActive") ) then
+				return
+			end
+			HUDScore.FadeProgress = math.min(1, HUDScore.FadeProgress + delta * 2)
+			HUDScore.Visible = true
+			if (HUDScore.FadeProgress == 1) then
+				HUDScore.FadeIn = false
+				HUDScore.FadeOut = false
+				HUDScore.Visible = true
+				--HUDScore.FadeTimer = setTimer(HUDScore.hide, 8 * SECONDS, 1)
+			end
+		elseif (HUDScore.FadeOut) then
+			HUDScore.FadeProgress = math.max(0, HUDScore.FadeProgress - delta * 2)
+			HUDScore.Visible = false;
+			if (HUDScore.FadeProgress == 0) then
+				HUDScore.FadeOut = false;
+			end
+		end
+
+		local progress = getEasingValue(HUDScore.FadeProgress, "OutBack")
+		if (progress > 0) then
+			offsetY = (1 - progress) * 2 * HUD_POS_Y
+			local HUD_POS_Y = HUD_POS_Y - offsetY
+			
+			dxDrawImage( HUD_POS_X, HUD_POS_Y, HUD_CIRCLE_WIDTH, HUD_CIRCLE_WIDTH, "data/images/circle.png", 0, 0, 0, tocolor(33, 33, 33, 155) )
+			dxDrawImage( HUD_POS_X, HUD_POS_Y, HUD_CIRCLE_WIDTH, HUD_CIRCLE_WIDTH, "data/images/circle-shadow.png", 0, 0, 0 )
+			
+			if tonumber(MATCHTIME.remainingTime) then
+				local duration = Arena.getMatchLength(arena)
+				local elapsed = duration - MATCHTIME.remainingTime
+				
+				dxDrawText( timeMsToTimeText( elapsed, true ), HUD_POS_X, HUD_POS_Y, HUD_POS_X + HUD_CIRCLE_WIDTH, HUD_POS_Y + HUD_CIRCLE_WIDTH, tocolor(255, 255, 255, 255), HUD_TIME_FONT_SIZE, "arial", "center", "center" );
+				
+				local completion = math.min( 360, math.floor( 360 * ( elapsed / duration ) ) );
+				for i=0, completion, 4 do
+					dxDrawImage( HUD_POS_X, HUD_POS_Y, HUD_CIRCLE_WIDTH, HUD_CIRCLE_WIDTH, "data/images/circle-counter.png", 90 + i, 0, 0, tocolor(255, 137, 0, 255));
+				end
+			
+				dxDrawRoundedRectangle( HUD_POS_X + ( HUD_CIRCLE_WIDTH - HUD_LABEL_WIDTH * 1.5 ) / 2, HUD_POS_Y + HUD_CIRCLE_WIDTH + HUD_PADDING, HUD_LABEL_WIDTH * 1.5, HUD_CIRCLE_WIDTH / 3, 100, tocolor(33, 33, 33, 200) );
+				dxDrawText( "Match duration: " .. timeMsToTimeText( duration, true ), HUD_POS_X + HUD_CIRCLE_WIDTH / 2, HUD_POS_Y + 7 / 6 * HUD_CIRCLE_WIDTH + HUD_PADDING, HUD_POS_X + HUD_CIRCLE_WIDTH / 2, HUD_POS_Y + 7 / 6 * HUD_CIRCLE_WIDTH + HUD_PADDING, tocolor(255,255,255,255), HUD_FONT_SIZE * 0.8, HUD_FONT, "center", "center" );
+			end
+			
+			--dxDrawImageSection( HUD_POS_X - HUD_LABEL_WIDTH, HUD_POS_Y + HUD_CIRCLE_WIDTH / 4, HUD_LABEL_WIDTH, HUD_CIRCLE_WIDTH / 2,  0, 48, 128, 32, "bar.png", 0, 0, 0, tocolor(33, 33, 33, 155) );
+			--dxDrawImageSection( HUD_POS_X + HUD_CIRCLE_WIDTH + HUD_LABEL_WIDTH, HUD_POS_Y + HUD_CIRCLE_WIDTH / 4, - HUD_LABEL_WIDTH, HUD_CIRCLE_WIDTH / 2,  0, 48, 128, 32, "bar.png", 0, 0, 0, tocolor(33, 33, 33, 155) );
+			
+			dxDrawRoundedRectangle( HUD_POS_X - HUD_LABEL_WIDTH - HUD_PADDING, HUD_POS_Y + HUD_CIRCLE_WIDTH / 4, HUD_LABEL_WIDTH, HUD_CIRCLE_WIDTH / 2, 100, tocolor(255,64,54,200) );
+			dxDrawRoundedRectangle( HUD_POS_X - HUD_PADDING - HUD_CIRCLE_WIDTH / 2, HUD_POS_Y + HUD_CIRCLE_WIDTH / 4, HUD_CIRCLE_WIDTH / 2, HUD_CIRCLE_WIDTH / 2, 100, tocolor(0,0,0,100) );
+			
+			dxDrawRoundedRectangle( HUD_POS_X + HUD_CIRCLE_WIDTH + HUD_PADDING, HUD_POS_Y + HUD_CIRCLE_WIDTH / 4, HUD_LABEL_WIDTH, HUD_CIRCLE_WIDTH / 2, 100, tocolor(54,64,255,200) );
+			dxDrawRoundedRectangle( HUD_POS_X + HUD_CIRCLE_WIDTH / 2 + HUD_PADDING + HUD_LABEL_WIDTH, HUD_POS_Y + HUD_CIRCLE_WIDTH / 4, HUD_CIRCLE_WIDTH / 2, HUD_CIRCLE_WIDTH / 2, 100, tocolor(0,0,0,100) );
+			
+			local score = {}
+			for id, team in ipairs(getElementsByType("matchteam", arena)) do
+				score[id] = tostring(getData(team, "Score") or 0);
+			end
+			
+			dxDrawText( "Red", HUD_POS_X - HUD_LABEL_WIDTH - HUD_PADDING, HUD_POS_Y + HUD_CIRCLE_WIDTH / 4, HUD_POS_X - HUD_PADDING - HUD_CIRCLE_WIDTH / 4, HUD_POS_Y + 3 * HUD_CIRCLE_WIDTH / 4, tocolor(255, 255, 255, 255), HUD_FONT_SIZE, HUD_FONT, "center", "center" );
+			dxDrawText( score[1], HUD_POS_X - HUD_CIRCLE_WIDTH / 2 - HUD_PADDING, HUD_POS_Y + HUD_CIRCLE_WIDTH / 4, HUD_POS_X - HUD_PADDING, HUD_POS_Y + 3 * HUD_CIRCLE_WIDTH / 4, tocolor(255, 255, 255, 255), HUD_FONT_SIZE, HUD_FONT, "center", "center" );
+			
+			dxDrawText( "Blue", HUD_POS_X + HUD_CIRCLE_WIDTH + HUD_PADDING, HUD_POS_Y + HUD_CIRCLE_WIDTH / 4, HUD_POS_X + HUD_CIRCLE_WIDTH + HUD_PADDING + HUD_LABEL_WIDTH - HUD_CIRCLE_WIDTH / 4, HUD_POS_Y + 3 * HUD_CIRCLE_WIDTH / 4, tocolor(255, 255, 255, 255), HUD_FONT_SIZE, HUD_FONT, "center", "center" );
+			dxDrawText( score[2], HUD_POS_X + HUD_CIRCLE_WIDTH / 2 + HUD_PADDING + HUD_LABEL_WIDTH, HUD_POS_Y + HUD_CIRCLE_WIDTH / 4, HUD_POS_X + HUD_CIRCLE_WIDTH + HUD_PADDING + HUD_LABEL_WIDTH, HUD_POS_Y + 3 * HUD_CIRCLE_WIDTH / 4, tocolor(255, 255, 255, 255), HUD_FONT_SIZE, HUD_FONT, "center", "center" );
+			
+			--outputChatBox(getData(getCurrentArena(), "TimePlayed"));
+			
+		end
+		
+		if (Arena.getState(arena) == "GoldenGoal") then
+			dxDrawRoundedRectangle( gScreenSizeX / 2 - HUD_LABEL_WIDTH, HUD_POS_Y + HUD_CIRCLE_WIDTH / 4, HUD_LABEL_WIDTH * 2, HUD_CIRCLE_WIDTH / 2, 100, tocolor( 217, 217, 25, 200 ) );
+			dxDrawText( "WINNING GOAL!", gScreenSizeX / 2, HUD_POS_Y + HUD_CIRCLE_WIDTH / 4, gScreenSizeX / 2, HUD_POS_Y + 3 * HUD_CIRCLE_WIDTH / 4, tocolor(255, 255, 255, 255), HUD_FONT_SIZE, "default-bold", "center", "center" );
+		end
+	end
+);
+
+--- Visual Field Limits ---
+
+addEventHandler("onClientArenaPlayerInit", resourceRoot,
+	function ()
+		-- load limits
+		pHeight = 100
+		--pFieldMinX, pFieldMinY, pFieldMinZ, pFieldMaxX, pFieldMaxY, pFieldMaxZ = Stadium.getCurrentLimits();
+		pCenterX, pCenterY, pCenterZ = (pFieldMinX + pFieldMaxX) / 2, (pFieldMinY + pFieldMaxY) / 2, pFieldMinZ + pHeight / 2 - 5
+		
+		--pFieldMaxX, pFieldMaxY = pFieldMaxX, pFieldMaxY + 2;
+		--pFieldMinX, pFieldMinY = pFieldMinX, pFieldMinY - 2;
+		pImpacts = { }
+	end
+)
+
+addEventHandler("onClientArenaPlayerExit", resourceRoot,
+	function ()
+		-- reset limits
+		pFieldMinX, pFieldMinY, pFieldMinZ = false, false, false
+		pFieldMaxX, pFieldMaxY, pFieldMaxZ = false, false, false
+		pHeight = false
+		pCenterX, pCenterY, pCenterZ = false, false, false
+	end
+)
+
+addEventHandler("onClientBallWallHit", root,
+	function (x, y, z, axis)
+		-- only add impacts on the x and y axis that are higher than one meter (because that's normally the board)
+		if (axis ~= "z" and z - pFieldMinZ > 1) then
+			table.insert(pImpacts, { x = x, y = y, z = z, axis = axis, alpha = math.min(255, 100 * getElementSpeed(source)) });
+		end
+	end
+)
+
+addEventHandler("onClientGameRender", root,
+	function (delta)
+		local removeTab = { };
+		for id, info in pairs(pImpacts) do
+			-- draw impacts on different axis with different orientation
+			if (info.axis == "x") then
+				dxDrawMaterialLine3D(info.x, info.y - IMPACT_SIZE / 2, info.z, info.x, info.y + IMPACT_SIZE / 2, info.z, 
+										pImpactMaterial, IMPACT_SIZE, tocolor(255, 255, 255, info.alpha), info.x + 100, info.y, info.z);
+			elseif (info.axis == "y") then
+				dxDrawMaterialLine3D(info.x - IMPACT_SIZE / 2, info.y, info.z, info.x + IMPACT_SIZE / 2, info.y, info.z, 
+										pImpactMaterial, IMPACT_SIZE, tocolor(255, 255, 255, info.alpha), info.x, info.y + 100, info.z);
+			end
+			info.alpha = math.max(0, info.alpha - delta * IMPACT_FADE_OUT_SPEED);
+			if (info.alpha == 0) then
+				table.insert(removeTab, id);
+			end
+		end
+		-- remove invisible impacts
+		for _, id in ipairs(removeTab) do
+			pImpacts[id] = nil;
+		end
+	end
+);
+
+
+--[[if (getVersion().sortable > "1.3.0-9.03931") then
+
+outputDebugString("Using dxDrawMaterialLine3D.");
+
+local material = dxCreateTexture("data/images/material.png");
+
+addEventHandler("onClientRender", root,
+	function ()
+		if (pFieldMinX) then
+			local x, y, z = getElementPosition(localPlayer);
+			local diffX = math.min(math.abs(pFieldMinX - x), math.abs(pFieldMaxX - x));
+			local diffY = math.min(math.abs(pFieldMinY - y), math.abs(pFieldMaxY - y));
+			local alpha = 200 - math.min(math.min(diffX, diffY) * 4, 200);-- + math.sin(getTickCount()/300)*50;
+			local color = tocolor(0, 0, 0, alpha);
+			dxDrawMaterialLine3D(pFieldMinX, pFieldMinY, pCenterZ, pFieldMaxX, pFieldMinY, pCenterZ, material, pHeight, color, pCenterX, pCenterY, pCenterZ);
+			dxDrawMaterialLine3D(pFieldMinX, pFieldMaxY, pCenterZ, pFieldMaxX, pFieldMaxY, pCenterZ, material, pHeight, color, pCenterX, pCenterY, pCenterZ);
+			dxDrawMaterialLine3D(pFieldMinX, pFieldMinY, pCenterZ, pFieldMinX, pFieldMaxY, pCenterZ, material, pHeight, color, pCenterX, pCenterY, pCenterZ);
+			dxDrawMaterialLine3D(pFieldMaxX, pFieldMinY, pCenterZ, pFieldMaxX, pFieldMaxY, pCenterZ, material, pHeight, color, pCenterX, pCenterY, pCenterZ);
+		end
+	end
+);
+
+else
+
+outputDebugString("Using Fallback: dxDrawLine3D.");
+
+addEventHandler("onClientRender", root,
+	function ()
+		if (gDraw and pFieldMinX) then
+			local alpha = 170;-- + math.sin(getTickCount()/200)*10;
+			local color = isInLimits() and tocolor(0, 200, 0, alpha) or tocolor(200, 0, 0, alpha);
+			dxDrawLine3D(pFieldMinX, pFieldMinY, pCenterZ, pFieldMaxX, pFieldMinY, pCenterZ, color, pHeight * 2);
+			dxDrawLine3D(pFieldMinX, pFieldMaxY, pCenterZ, pFieldMaxX, pFieldMaxY, pCenterZ, color, pHeight * 2);
+			dxDrawLine3D(pFieldMinX, pFieldMinY, pCenterZ, pFieldMinX, pFieldMaxY, pCenterZ, color, pHeight * 2);
+			dxDrawLine3D(pFieldMaxX, pFieldMinY, pCenterZ, pFieldMaxX, pFieldMaxY, pCenterZ, color, pHeight * 2);
+		end
+	end
+);
+
+end]]
+
+addEventHandler("onClientArenaPlayerInit", resourceRoot,
+	function ()
+	
+	end
+);
+
+addEventHandler("onClientArenaPlayerExit", resourceRoot,
+	function ()
+	
+	end
+);
+
+--Reset camera on respawn
+--[[addEventHandler("onClientMatchRespawn", localPlayer,
+	function(remainingTime)
+		local view = getCameraViewMode();
+		setCameraViewMode(5);
+		setTimer(setCameraViewMode, 50, 1, view);
+
+		if remainingTime then
+			MATCHTIME.remainingTime = math.max(0, remainingTime);
+			MATCHTIME.lastTimestamp = getRealTime()['timestamp'];
+
+			if not MATCHTIME.frozen then
+				MATCHTIME.remainingTime = MATCHTIME.remainingTime - getPlayerPing(localPlayer);
+			end
+		end
+	end
+);--]]
+
+
+-- Bounce script
+function jump()      
+	if (pJumpCount > 0) then
+		local vehicle = getPedOccupiedVehicle(localPlayer);  
+		if (isValid(vehicle) and not getData(vehicle, "BallParent")) then
+			local vx, vy, vz = getElementVelocity(vehicle);
+			setElementVelocity(vehicle, vx, vy, vz + 0.3);
+			pJumpCount = pJumpCount - 1;
+			setTimer(function () pJumpCount = pJumpCount + 1; end, 2000, 1);
+		end
+	end
+end
+bindKey("lshift", "down", jump, "jump", "Jump");
+
+-- Kick script
+KICK_SPRING = 0;
+KICK_SPRING_MIN = 0.2;
+KICK_SPRING_BONUS = 1;
+KICK_SPRING_START = false;
+KICK_SPRING_DURATION = 1500;
+
+KICK_SPRING_LAST_BOOST = 0;
+KICK_SPRING_COOLDOWN = 5000;
+
+KICK_MAX_POWER = 4;
+
+KICK_HUD_BORDER_WIDTH = math.floor(3 * RELATIVE_MULT_Y)
+
+addEventHandler("onClientRender", root,
+	function()
+		local arena = getCurrentArena();
+		local vehicle = Player.getVehicle(localPlayer);
+		if (arena ~= LOBBY_ARENA and Arena.getState(arena) == "Running" and vehicle and getPedOccupiedVehicle(localPlayer)) then
+			if getKeyState("MOUSE1") then
+				local tick = getTickCount();
+				local diff = tick - KICK_SPRING_LAST_BOOST;
+				if (diff < KICK_SPRING_COOLDOWN) then
+					local timeLeft = KICK_SPRING_COOLDOWN - diff;
+					dxDrawText( "Cooldown: " .. timeMsToTimeText(timeLeft), gScreenSizeX / 2, gScreenSizeY - HUD_CIRCLE_WIDTH * 1.75, gScreenSizeX / 2, gScreenSizeY - HUD_CIRCLE_WIDTH * 1.75, tocolor(255, 255, 255, 255), 
+							HUD_FONT_SIZE, "arial", "center", "center");
+					return;
+				end
+
+				if not KICK_SPRING_START then
+					KICK_SPRING_START = getTickCount();
+				end
+
+				local rel_time = math.min(1, (tick - KICK_SPRING_START) / KICK_SPRING_DURATION);
+
+				local power = rel_time * KICK_MAX_POWER;
+
+				KICK_SPRING = math.min(1, (2^power / 2^KICK_MAX_POWER));
+
+				KICK_SPRING = math.max(0.05, KICK_SPRING);
+
+				dxDrawRoundedRectangle( ( gScreenSizeX - HUD_LABEL_WIDTH * 2 ) / 2, gScreenSizeY - HUD_CIRCLE_WIDTH * 2, HUD_LABEL_WIDTH * 2, HUD_CIRCLE_WIDTH / 2, 100, tocolor(10,10,10,200) );
+				dxDrawRoundedRectangle( ( gScreenSizeX - HUD_LABEL_WIDTH * 2 ) / 2 + KICK_HUD_BORDER_WIDTH, gScreenSizeY - HUD_CIRCLE_WIDTH * 2 + KICK_HUD_BORDER_WIDTH, 
+										HUD_LABEL_WIDTH * 2 * KICK_SPRING - 2 * KICK_HUD_BORDER_WIDTH, HUD_CIRCLE_WIDTH / 2 - 2 * KICK_HUD_BORDER_WIDTH, 100, tocolor( 46, 204, 64, 155 ) );
+				dxDrawText( "POWER KICK", gScreenSizeX / 2, gScreenSizeY - HUD_CIRCLE_WIDTH * 1.75, gScreenSizeX / 2, gScreenSizeY - HUD_CIRCLE_WIDTH * 1.75, tocolor(255, 255, 255, 155), 
+							HUD_FONT_SIZE, "arial", "center", "center");
+			else
+				if KICK_SPRING >= KICK_SPRING_MIN then
+					local vx, vy, vz = getElementVelocity(vehicle);
+					local total = math.abs(vx) + math.abs(vy);
+					if total > 0 then
+						
+						if getKeyState("MOUSE2") then
+							local addZ = 0;
+							math.randomseed(getTickCount() * math.random());
+							local stunt = math.random(1, 3);
+							if stunt == 1 then
+								--back-flip
+								_, _, rz = getElementRotation(vehicle);
+								tx, ty, tz = getElementAngularVelocity(vehicle);
+								setElementAngularVelocity(vehicle, tx + 0.34*math.cos(math.rad(rz)), ty + 0.34*math.sin(math.rad(rz)), tz);
+								addZ = 0.10;
+							elseif stunt == 2 then
+								--front-flip
+								_, _, rz = getElementRotation(vehicle);
+								tx, ty, tz = getElementAngularVelocity(vehicle);
+								setElementAngularVelocity(vehicle, tx + -0.34*math.cos(math.rad(rz)), ty + -0.34*math.sin(math.rad(rz)), tz);
+								addZ = 0.15;
+							else
+								--spin
+								tx, ty, tz = getElementAngularVelocity(vehicle);
+								setElementAngularVelocity(vehicle, tx, ty, tz + 0.405);
+								addZ = 0.15;
+							end
+							vz = addZ;
+						end
+
+						setElementVelocity(vehicle, vx + vx / total * KICK_SPRING_BONUS * KICK_SPRING, vy + vy / total * KICK_SPRING_BONUS * KICK_SPRING, vz);
+						local time = 50 + 150 * KICK_SPRING;
+						setTimer( setElementVelocity, time, 1, vehicle, vx * 1.2, vy * 1.2, vz * 1.2 );
+
+						KICK_SPRING_LAST_BOOST = getTickCount();
+					end
+				end
+				KICK_SPRING = 0;
+				KICK_SPRING_START = false;
+			end
+		end
+	end
+)
+

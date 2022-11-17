@@ -1,0 +1,132 @@
+<meta>
+    <info 
+    	sandbox="carball"
+    	author="Tjong"
+    	version="1"
+    	type="gamemode"
+    	name="Carball"
+    cached="false" />
+    
+    <!-- Include Files -->
+    <script src="includeb.lua" type="shared" cached="false" />
+    <script src="includes.lua" type="server" cached="false" />
+	<script src="includec.lua" type="client" cached="false" />
+	
+	<script src="shared/bGlobals.lua" type="shared" cached="false" />
+	<script src="shared/bArena.lua" type="shared" cached="false" />
+	<script src="shared/bBall.lua" type="shared" cached="false" />
+	<script src="shared/bPlayer.lua" type="shared" cached="false" />
+	<script src="shared/bStadium.lua" type="shared" cached="false" />
+	<script src="shared/bTeams.lua" type="shared" cached="false" />
+	<script src="shared/bUseful.lua" type="shared" cached="false" />
+    
+    <!-- Carball Script Files -->
+	<script src="server/sGlobals.lua" type="server" cached="false" />
+    <script src="server/sAntiLag.lua" type="server" cached="false" />
+	<script src="server/sArena.lua" type="server" cached="false" />
+	<script src="server/sBall.lua" type="server" cached="false" />
+	<script src="server/sGameplay.lua" type="server" cached="false" />
+	<script src="server/sGoal.lua" type="server" cached="false" />
+	<script src="server/sMain.lua" type="server" cached="false" />
+	<script src="server/sPlayer.lua" type="server" cached="false" />
+	<script src="server/sRecording.lua" type="server" cached="false" />
+	<script src="server/sSqlPlayer.lua" type="server" cached="false" />
+	<script src="server/sStadium.lua" type="server" cached="false" />
+	<script src="server/sStaticGlobalSaver.lua" type="server" cached="false" />
+	<script src="server/sStatistic.lua" type="server" cached="false" />
+	<script src="server/sTeam.lua" type="server" cached="false" />
+	
+	<script src="client/cGlobals.lua" type="client" cached="false" />
+	<script src="client/cLobby.lua" type="client" cached="false" />
+	<script src="client/cMain.lua" type="client" cached="false" />
+	<script src="client/cArena.lua" type="client" cached="false" />
+	<script src="client/cGameplay.lua" type="client" cached="false" />
+	<script src="client/cBall.lua" type="client" cached="false" />
+	<script src="client/cCamera.lua" type="client" cached="false" />
+	<script src="client/cClickableItem.lua" type="client" cached="false" />
+	<script src="client/cDebug.lua" type="client" cached="false" />
+	<script src="client/cGoal.lua" type="client" cached="false" />
+	<script src="client/cLOD.lua" type="client" cached="false" />
+	<script src="client/cMinimap.lua" type="client" cached="false" />
+	<script src="client/cNametags.lua" type="client" cached="false" />
+	<script src="client/cOptions.lua" type="client" cached="false" />
+	<script src="client/cRecording.lua" type="client" cached="false" />
+	<script src="client/cScreens.lua" type="client" cached="false" />
+	<script src="client/cSound.lua" type="client" cached="false" />
+	<script src="client/cStadium.lua" type="client" cached="false" />
+	<script src="client/cUsefulEvents.lua" type="client" cached="false" />
+	
+    <min_mta_version client="1.3.1" server="1.3.1" cached="false" />
+
+    <export function="getArenaName" type="client" />
+    
+    <!-- Images -->
+    <file src="data/images/ballicon.png" type="client" cached="false" />
+    <file src="data/images/localplayerblip.png" type="client" cached="false" />
+    <file src="data/images/playerblip.png" type="client" cached="false" />
+    
+    <file src="data/images/material.png" type="client" cached="false" />
+    <file src="data/images/impact.png" type="client" cached="false" />
+    <file src="data/images/invisible.png" type="client" cached="false" />
+    
+    <file src="data/images/ballarrow.png" type="client" cached="false" />
+    <file src="data/images/carballLobbyBackground.png" type="client" cached="false" />
+    <file src="data/images/roundBackground.png" type="client" cached="false" />
+    <file src="data/images/scroll-shadow.png" type="client" cached="false" />
+    <file src="data/images/switcharrow.png" type="client" cached="false" />
+    <file src="data/images/password.png" type="client" cached="false" />
+	<file src="data/images/carball-map.jpg" type="client" cached="false" />
+	<file src="data/images/bg.jpg" type="client" cached="false" />
+    <file src="data/images/logo.png" type="client" cached="false" />
+	
+	<file src="data/images/circle.png" type="client" cached="false" />
+	<file src="data/images/circle-shadow.png" type="client" cached="false" />
+	<file src="data/images/circle-counter.png" type="client" cached="false" />
+	
+	<file src="data/images/stadium-mask.png" type="client" cached="false" />
+	<file src="data/images/stadium-shadow.png" type="client" cached="false" />
+	
+	<file src="data/images/stadium-ffs.jpg" type="client" cached="false" />
+	
+	<file src="data/images/field.png" type="client" cached="false" />
+	
+	<!-- Shaders -->
+	<file src="data/shaders/hud_mask.fx" type="client" cached="false" />
+	<file src="data/shaders/tex_matrix.fx" type="client" cached="false" />
+	<file src="data/shaders/tex_replace.fx" type="client" cached="false" />
+    
+    <!-- Audio -->
+	<file src="data/audio/statUpdate.mp3" cached="false" />
+	<file src="data/audio/buttonHover.mp3" cached="false" />
+	<file src="data/audio/buttonSelect.mp3" cached="false" />
+	
+	<file src="data/audio/kick.mp3" cached="false" />
+	<file src="data/audio/hardposthit.mp3" cached="false" />
+	<file src="data/audio/audience.mp3" cached="false" />
+	<file src="data/audio/referee.mp3" cached="false" />
+	<file src="data/audio/goal.mp3" cached="false" />
+	<file src="data/audio/ouh.mp3" cached="false" />
+	<file src="data/audio/booing.mp3" cached="false" />
+	<file src="data/audio/go.mp3" cached="false" />
+	
+	<file src="data/audio/bounce.mp3" cached="false" />
+	<file src="data/audio/net.mp3" cached="false" />
+	<file src="data/audio/post.mp3" cached="false" />
+    
+    <!-- Textures & Models -->
+    <!--<file src="data/models/balltexture.txd" cached="false" />
+	<file src="data/models/balltexture.dff" cached="false" />
+	<file src="data/models/ballcollision.dff" cached="false" />-->
+	
+	<file src="data/models/ball.dff" type="client" cached="false" />
+	
+	<file src="data/models/sandking.dff" type="client" cached="false" />
+	<file src="data/models/sandking.txd" type="client" cached="false" />
+	
+	<file src="data/models/skins/sandking-blue.png" type="client" cached="false" />
+    
+    <!-- Fonts -->
+    <file src="data/fonts/cb-black.ttf" type="client" cached="false" />
+	<file src="data/fonts/cb-bold.ttf" type="client" cached="false" />
+	<file src="data/fonts/cb-light.ttf" type="client" cached="false" />
+</meta>
