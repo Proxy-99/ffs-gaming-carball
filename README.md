@@ -1,4 +1,4 @@
-# ffs-gaming-carball script
+# ffs gaming carball script
 mta sa
  ffs gaming carball scripts
  carball scripts
